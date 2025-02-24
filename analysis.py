@@ -20,6 +20,14 @@ def load_and_preprocess_data(file_path):
     ]
     df.columns = new_columns
     
+    # 空白を前の有効な値で埋める（事業者名、路線、方向）
+    fill_columns = ['事業者名', '路線', '方向']
+    for col in fill_columns:
+        df[col] = df[col].fillna(method='ffill')
+        
+    # 発駅と着駅が両方空白の行を削除
+    df = df.dropna(subset=['発駅', '着駅'], how='all')
+    
     # 数値データのカンマを除去して数値に変換
     for col in df.columns[5:]:  # 時間帯の列のみを処理
         df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce')
@@ -40,32 +48,59 @@ def load_and_preprocess_data(file_path):
     }
     df_melted['時間帯'] = df_melted['時間帯'].map(time_mapping)
     
-    # 駅間を作成（NaNを空文字列に置換）
+    # 発駅と着駅の空白を処理
     df_melted['発駅'] = df_melted['発駅'].fillna('')
     df_melted['着駅'] = df_melted['着駅'].fillna('')
     df_melted['駅間'] = df_melted['発駅'] + '-' + df_melted['着駅']
     
-    # NaNを含む行を削除
-    df_melted = df_melted.dropna()
+    # 輸送人員が欠損している行のみを削除
+    df_melted = df_melted.dropna(subset=['輸送人員'])
     
     return df_melted
 
 # ヒートマップの作成
-def create_heatmap(df):
-    pivot_table = df.pivot_table(
+def create_heatmap(df, line_name, direction, start_company='京阪電気鉄道'):
+    # 京阪電気鉄道以降のデータを抽出
+    start_idx = df[df['事業者名'] == start_company].index[0]
+    filtered_df = df.iloc[start_idx:]
+    
+    # 特定の路線と方向のデータを抽出
+    line_data = filtered_df[
+        (filtered_df['路線'] == line_name) & 
+        (filtered_df['方向'] == direction)
+    ]
+    
+    # 駅間と時間帯のピボットテーブル作成
+    pivot_data = pd.pivot_table(
+        line_data,
         values='輸送人員',
-        index='駅間',
+        index='発駅',
         columns='時間帯',
         aggfunc='mean'
     )
     
-    plt.figure(figsize=(15, 10))
-    sns.heatmap(pivot_table, cmap='YlOrRd', annot=True, fmt='.0f')
-    plt.title('時間帯別・駅間の輸送人員ヒートマップ')
+    # データが空の場合は処理を中断
+    if pivot_data.empty:
+        print(f"警告: {line_name}（{direction}）のデータが見つかりません")
+        return
+    
+    # プロットサイズの設定
+    plt.figure(figsize=(15, len(pivot_data)/2))
+    
+    # ヒートマップの作成
+    sns.heatmap(
+        pivot_data,
+        cmap='YlOrRd',  # 色パレット
+        fmt='.0f',      # 整数表示
+        cbar_kws={'label': '輸送人員（人）'},
+        xticklabels=45  # x軸ラベルの角度
+    )
+    
+    plt.title(f'{line_name}（{direction}）時間帯別輸送人員ヒートマップ')
     plt.xlabel('時間帯')
-    plt.ylabel('駅間')
+    plt.ylabel('発駅')
     plt.tight_layout()
-    plt.savefig('heatmap.png')
+    plt.savefig(f'heatmap_{line_name}_{direction}.png')
     plt.close()
 
 # 特定駅の時間帯別輸送人員の折れ線グラフ
@@ -104,15 +139,15 @@ def main():
     # データの読み込み
     df = load_and_preprocess_data('001179022.csv')
     
-    # 各グラフの作成
-    create_heatmap(df)
+    # 京阪本線の上り下りそれぞれのヒートマップを作成
+    line_name = '京阪本線'
+    for direction in ['下り', '上り']:
+        create_heatmap(df, line_name, direction, start_company='京阪電気鉄道')
+    
+    # その他の処理は同じ
     create_station_timeline(df, '京都')
     create_line_comparison(df)
-    
-    # 整理したデータをExcelに出力
     df.to_excel('analyzed_data.xlsx', index=False)
-    
-    # 分析結果のレポート作成
     create_report(df)
 
 def create_report(df):
