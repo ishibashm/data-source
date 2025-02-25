@@ -13,10 +13,10 @@ def load_and_preprocess_data(file_path):
     # 実際の列名を使用
     new_columns = [
         '事業者名', '路線', '方向', '発駅', '着駅',
-        '6時以前', '7時前半', '7時後半', '8時前半', '8時後半',
-        '9時前半', '9時後半', '10時台', '11-12時台', '13-14時台',
-        '15-16時台', '17時台', '18時台', '19時台', '20時台',
-        '21時台', '22時台', '23時台', '24時以降'
+        '始発～6:59', '7:00～7:29', '7:30～7:59', '8:00～8:29', '8:30～8:59',
+        '9:00～9:29', '9:30～9:59', '10:00～10:59', '11:00～12:59', '13:00～14:59',
+        '15:00～16:59', '17:00～17:59', '18:00～18:59', '19:00～19:59', '20:00～20:59',
+        '21:00～21:59', '22:00～22:59', '23:00～23:59', '24:00～終発'
     ]
     df.columns = new_columns
     
@@ -39,14 +39,40 @@ def load_and_preprocess_data(file_path):
         value_name='輸送人員'
     )
     
-    # 時間帯を数値に変換（簡略化のため、時間帯の中央値を使用）
+    # 時間帯の順序を定義
+    time_order = [
+        '始発-6時台', '7時前半', '7時後半', '8時前半', '8時後半',
+        '9時前半', '9時後半', '10時台', '11-12時台', '13-14時台',
+        '15-16時台', '17時台', '18時台', '19時台', '20時台',
+        '21時台', '22時台', '23時台', '24時以降'
+    ]
+    
+    # 時間帯を文字列にマッピング
     time_mapping = {
-        '6時以前': 6, '7時前半': 7, '7時後半': 7.5, '8時前半': 8, '8時後半': 8.5,
-        '9時前半': 9, '9時後半': 9.5, '10時台': 10, '11-12時台': 11.5, '13-14時台': 13.5,
-        '15-16時台': 15.5, '17時台': 17, '18時台': 18, '19時台': 19, '20時台': 20,
-        '21時台': 21, '22時台': 22, '23時台': 23, '24時以降': 24
+        '始発～6:59': '始発-6時台',
+        '7:00～7:29': '7時前半',
+        '7:30～7:59': '7時後半',
+        '8:00～8:29': '8時前半',
+        '8:30～8:59': '8時後半',
+        '9:00～9:29': '9時前半',
+        '9:30～9:59': '9時後半',
+        '10:00～10:59': '10時台',
+        '11:00～12:59': '11-12時台',
+        '13:00～14:59': '13-14時台',
+        '15:00～16:59': '15-16時台',
+        '17:00～17:59': '17時台',
+        '18:00～18:59': '18時台',
+        '19:00～19:59': '19時台',
+        '20:00～20:59': '20時台',
+        '21:00～21:59': '21時台',
+        '22:00～22:59': '22時台',
+        '23:00～23:59': '23時台',
+        '24:00～終発': '24時以降'
     }
     df_melted['時間帯'] = df_melted['時間帯'].map(time_mapping)
+    
+    # 時間帯を順序付きカテゴリ型に変換
+    df_melted['時間帯'] = pd.Categorical(df_melted['時間帯'], categories=time_order, ordered=True)
     
     # 発駅と着駅の空白を処理
     df_melted['発駅'] = df_melted['発駅'].fillna('')
@@ -60,6 +86,14 @@ def load_and_preprocess_data(file_path):
 
 # ヒートマップの作成
 def create_heatmap(df, line_name, direction, start_company='京阪電気鉄道'):
+    # 時間帯の順序を定義
+    time_order = [
+        '始発-6時台', '7時前半', '7時後半', '8時前半', '8時後半',
+        '9時前半', '9時後半', '10時台', '11-12時台', '13-14時台',
+        '15-16時台', '17時台', '18時台', '19時台', '20時台',
+        '21時台', '22時台', '23時台', '24時以降'
+    ]
+    
     # 京阪電気鉄道以降のデータを抽出
     start_idx = df[df['事業者名'] == start_company].index[0]
     filtered_df = df.iloc[start_idx:]
@@ -79,6 +113,12 @@ def create_heatmap(df, line_name, direction, start_company='京阪電気鉄道')
         aggfunc='mean'
     )
     
+    # 駅の順序を取得（データフレームの順序を使用）
+    station_order = line_data['発駅'].unique()
+    
+    # ピボットテーブルを路線順に並び替え
+    pivot_data = pivot_data.reindex(index=station_order, columns=time_order)
+    
     # データが空の場合は処理を中断
     if pivot_data.empty:
         print(f"警告: {line_name}（{direction}）のデータが見つかりません")
@@ -90,11 +130,13 @@ def create_heatmap(df, line_name, direction, start_company='京阪電気鉄道')
     # ヒートマップの作成
     sns.heatmap(
         pivot_data,
-        cmap='YlOrRd',  # 色パレット
-        fmt='.0f',      # 整数表示
-        cbar_kws={'label': '輸送人員（人）'},
-        xticklabels=45  # x軸ラベルの角度
+        cmap='YlOrRd',
+        fmt='.0f',
+        cbar_kws={'label': '輸送人員（人）'}
     )
+    
+    # x軸のラベルを調整
+    plt.xticks(rotation=45, ha='right')
     
     plt.title(f'{line_name}（{direction}）時間帯別輸送人員ヒートマップ')
     plt.xlabel('時間帯')
@@ -113,8 +155,9 @@ def create_station_timeline(df, station_name):
     plt.figure(figsize=(12, 6))
     plt.plot(timeline.index, timeline.values, marker='o')
     plt.title(f'{station_name}の時間帯別輸送人員')
+    plt.xticks(rotation=45, ha='right')
     plt.xlabel('時間帯')
-    plt.ylabel('平均輸送人員')
+    plt.ylabel('平均輸送人員（人）')
     plt.grid(True)
     plt.tight_layout()
     plt.savefig('station_timeline.png')
