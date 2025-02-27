@@ -46,6 +46,29 @@ def create_commute_age_plot(df, age_columns, output_dir):
     plt.savefig(output_dir / 'commute_by_age_gender.png', dpi=300)
     plt.close()
 
+def verify_data(df, target_regions, age_columns, output_dir):
+    """データの正確性を検証"""
+    # 検証結果をファイルに書き出す
+    verification_file = output_dir / 'data_verification.txt'
+    
+    with open(verification_file, 'w', encoding='utf-8') as f:
+        f.write("データ検証結果:\n")
+        f.write("-" * 50 + "\n")
+        
+        for region in target_regions:
+            f.write(f"\n{region}:\n")
+            region_data = df[df['地域'] == region]
+            
+            for gender in ['男性', '女性']:
+                gender_data = region_data[region_data['性別'] == gender]
+                f.write(f"\n{gender}:\n")
+                for age in age_columns:
+                    value = gender_data[age].sum()
+                    f.write(f"{age}: {value:,}\n")
+                f.write(f"合計: {gender_data[age_columns].sum().sum():,}\n")
+    
+    print(f"検証結果を {verification_file} に保存しました。")
+
 def create_region_heatmap(df, age_columns, output_dir):
     """主要地域の通勤者数ヒートマップを作成"""
     target_regions = [
@@ -57,65 +80,58 @@ def create_region_heatmap(df, age_columns, output_dir):
         '近畿圏計'
     ]
     
+    # データの検証を実行
+    verify_data(df, target_regions, age_columns, output_dir)
+    
     plt.figure(figsize=(30, 10))
     
-    # データ準備
-    male_data = df[(df['通勤・通学'] == '通勤') & 
-                   (df['地域'].isin(target_regions)) &
-                   (df['性別'] == '男性')].pivot_table(
-        values=age_columns,
-        index='地域',
-        aggfunc='sum'
-    ).astype(int)
+    # データ準備（検証と同じ方法で）
+    data_dict = {}
     
-    female_data = df[(df['通勤・通学'] == '通勤') & 
-                     (df['地域'].isin(target_regions)) &
-                     (df['性別'] == '女性')].pivot_table(
-        values=age_columns,
-        index='地域',
-        aggfunc='sum'
-    ).astype(int)
+    for region in target_regions:
+        region_data = df[df['地域'] == region]
+        
+        for gender in ['男性', '女性']:
+            gender_data = region_data[region_data['性別'] == gender]
+            
+            # 年齢層ごとのデータを追加
+            for age in age_columns:
+                value = int(gender_data[age].sum())  # 整数に変換
+                data_dict[(region, f"{gender}_{age}")] = value
+            
+            # 合計を追加
+            total = int(gender_data[age_columns].sum().sum())  # 整数に変換
+            data_dict[(region, f"{gender}_合計")] = total
     
-    # 合計計算
-    male_total = male_data.sum(axis=1)
-    female_total = female_data.sum(axis=1)
-    
-    # データ結合と列の順序変更
-    heatmap_data = pd.DataFrame()
-    
-    # 年齢層の順序を調整（～14歳を最初に）
-    age_columns_reordered = ['～14歳'] + [col for col in age_columns if col != '～14歳']
-    
-    # 男性データを追加
-    for age in age_columns_reordered:
-        heatmap_data[('男性', age)] = male_data[age]
-    heatmap_data[('男性', '合計')] = male_total
-    
-    # 女性データを追加
-    for age in age_columns_reordered:
-        heatmap_data[('女性', age)] = female_data[age]
-    heatmap_data[('女性', '合計')] = female_total
+    # DataFrameに変換
+    columns = [f"{gender}_{age}" for gender in ['男性', '女性'] 
+              for age in age_columns + ['合計']]
+    heatmap_data = pd.DataFrame(
+        [[data_dict.get((region, col), 0) for col in columns] 
+         for region in target_regions],
+        index=target_regions,
+        columns=columns
+    )
     
     # カラースケールの調整
     data_values = heatmap_data.values.flatten()
-    data_values = data_values[data_values != 0]  # 0を除外
+    data_values = data_values[data_values != 0]
     
-    # パーセンタイルの範囲をより細かく設定
-    vmin = np.percentile(data_values, 1)    # 下位1%
-    vmax = np.percentile(data_values, 99)   # 上位99%
+    vmin = np.percentile(data_values, 1)
+    vmax = np.percentile(data_values, 99)
     
     # ヒートマップの作成
     sns.heatmap(heatmap_data, 
                 annot=True, 
                 fmt=',d',
-                cmap='YlOrRd',              # 黄色→オレンジ→赤のグラデーション
+                cmap='YlOrRd',
                 cbar_kws={'label': '通勤者数'},
                 xticklabels=True,
                 square=False,
                 annot_kws={'size': 8},
                 vmin=vmin,
                 vmax=vmax,
-                center=None,                 # centerを削除して単調な色変化に
+                center=None,
                 robust=True)
     
     plt.title('地域別の性別・年齢層別通勤者数', pad=20)
